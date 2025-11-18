@@ -1,0 +1,1984 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using cAlgo.API;
+using cAlgo.API.Internals;
+using cAlgo.API.Indicators;
+
+namespace cAlgo.Robots
+{
+    [Robot(TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
+    public class ORBSmartMoneyBot_XAUUSD_FIXED : Robot
+    {
+        #region Parameters – Session / Filters
+
+        [Parameter("New York Session Start (ET)", DefaultValue = 9.5, MinValue = 0, MaxValue = 23)]
+        public double NewYorkStartHour { get; set; }
+
+        [Parameter("New York Session End (ET)", DefaultValue = 16.0, MinValue = 1, MaxValue = 24)]
+        public double NewYorkEndHour { get; set; }
+
+        [Parameter("Trade Only Weekdays", DefaultValue = true)]
+        public bool TradeOnlyWeekdays { get; set; }
+
+        [Parameter("Avoid High Impact News", DefaultValue = true)]
+        public bool AvoidHighImpactNews { get; set; }
+
+        [Parameter("ORB Timeframe", DefaultValue = "Hour1")]
+        public string OrbTimeframeString { get; set; }
+
+        [Parameter("Entry Timeframe", DefaultValue = "Minute5")]
+        public string EntryTimeframeString { get; set; }
+
+        [Parameter("Auto Calculate ORB", DefaultValue = true)]
+        public bool AutoCalculateORB { get; set; }
+
+        [Parameter("ORB Validation Period (Bars)", DefaultValue = 8, MinValue = 5, MaxValue = 30)]
+        public int OrbValidationPeriod { get; set; }
+
+        #endregion
+
+        #region Parameters – Risk / Position Management
+
+        [Parameter("Fixed Volume (lots)", DefaultValue = 0.01, MinValue = 0.01, MaxValue = 0.1)]
+        public double FixedVolumeLots { get; set; }
+
+        [Parameter("Use Risk Management", DefaultValue = false)]
+        public bool UseRiskManagement { get; set; }
+
+        [Parameter("Risk Percentage (%)", DefaultValue = 0.5, MinValue = 0.1, MaxValue = 2.0)]
+        public double RiskPercentage { get; set; }
+
+        [Parameter("Stop Loss (pips)", DefaultValue = 60.0, MinValue = 20, MaxValue = 150)]
+        public double FixedStopLossPips { get; set; }
+
+        [Parameter("Take Profit (pips)", DefaultValue = 90.0, MinValue = 30, MaxValue = 300)]
+        public double FixedTakeProfitPips { get; set; }
+
+        [Parameter("Use ATR-based TP/SL", DefaultValue = true)]
+        public bool UseAtrBasedTPSL { get; set; }
+
+        [Parameter("ATR Multiplier for SL", DefaultValue = 2.0, MinValue = 1.0, MaxValue = 4.0)]
+        public double AtrMultiplierSL { get; set; }
+
+        [Parameter("Risk-Reward Ratio", DefaultValue = 1.5, MinValue = 1.0, MaxValue = 5.0)]
+        public double RiskRewardRatio { get; set; }
+
+        [Parameter("Entry Method (1=Immediate,2=Retest,3=Break Prev)", DefaultValue = 2, MinValue = 1, MaxValue = 3)]
+        public int EntryMethod { get; set; }
+
+        [Parameter("Enable Dynamic Entry", DefaultValue = true)]
+        public bool EnableDynamicEntry { get; set; }
+
+        [Parameter("ATR Period", DefaultValue = 14, MinValue = 10, MaxValue = 50)]
+        public int AtrPeriod { get; set; }
+
+        [Parameter("High Volatility Threshold (ATR)", DefaultValue = 2.5, MinValue = 1.5, MaxValue = 4.0)]
+        public double HighVolatilityThreshold { get; set; }
+
+        [Parameter("Low Volatility Threshold (ATR)", DefaultValue = 0.8, MinValue = 0.3, MaxValue = 1.5)]
+        public double LowVolatilityThreshold { get; set; }
+
+        [Parameter("Min Breakout Strength (pips)", DefaultValue = 5.0, MinValue = 2.0, MaxValue = 15.0)]
+        public double MinBreakoutStrengthPips { get; set; }
+
+        [Parameter("Trend Strength Period", DefaultValue = 35, MinValue = 10, MaxValue = 50)]
+        public int TrendStrengthPeriod { get; set; }
+
+        [Parameter("Strong Trend Threshold", DefaultValue = 0.7, MinValue = 0.1, MaxValue = 1)]
+        public double StrongTrendThreshold { get; set; }
+
+        [Parameter("Retest Tolerance (pips)", DefaultValue = 10.0, MinValue = 3.0, MaxValue = 20)]
+        public double RetestTolerancePips { get; set; }
+
+        [Parameter("Require Momentum Confirmation", DefaultValue = true)]
+        public bool RequireMomentumConfirmation { get; set; }
+
+        [Parameter("Enable Smart Money Concepts", DefaultValue = true)]
+        public bool EnableSMC { get; set; }
+
+        [Parameter("Detect Fair Value Gaps", DefaultValue = true)]
+        public bool DetectFVG { get; set; }
+
+        [Parameter("FVG Minimum Size (pips)", DefaultValue = 15.0, MinValue = 5, MaxValue = 40)]
+        public double FvgMinSizePips { get; set; }
+
+        [Parameter("FVG Max Age (hours)", DefaultValue = 48.0, MinValue = 12, MaxValue = 168)]
+        public double FvgMaxAgeHours { get; set; }
+
+        [Parameter("Require FVG Confirmation", DefaultValue = false)]
+        public bool RequireFVGConfirmation { get; set; }
+
+        [Parameter("Enable Trailing Stop", DefaultValue = true)]
+        public bool EnableTrailingStop { get; set; }
+
+        [Parameter("Trailing Stop Trigger (pips)", DefaultValue = 40.0, MinValue = 15, MaxValue = 100)]
+        public double TrailingStopTriggerPips { get; set; }
+
+        [Parameter("Trailing Stop Distance (pips)", DefaultValue = 20.0, MinValue = 10, MaxValue = 50)]
+        public double TrailingStopDistancePips { get; set; }
+
+        [Parameter("Enable Break Even", DefaultValue = true)]
+        public bool EnableBreakEven { get; set; }
+
+        [Parameter("Break Even Trigger (pips)", DefaultValue = 30.0, MinValue = 10, MaxValue = 80)]
+        public double BreakEvenTriggerPips { get; set; }
+
+        [Parameter("Max Daily Trades", DefaultValue = 2, MinValue = 1, MaxValue = 5)]
+        public int MaxDailyTrades { get; set; }
+
+        [Parameter("Max Spread (pips)", DefaultValue = 5.0, MinValue = 1.0, MaxValue = 10.0)]
+        public double MaxSpreadPips { get; set; }
+
+        [Parameter("Max Drawdown (%)", DefaultValue = 5.0, MinValue = 2.0, MaxValue = 10.0)]
+        public double MaxDrawdownPercentage { get; set; }
+
+        [Parameter("Draw ORB Levels", DefaultValue = true)]
+        public bool DrawOrbLevels { get; set; }
+
+        [Parameter("Draw FVG Zones", DefaultValue = true)]
+        public bool DrawFVGZones { get; set; }
+
+        [Parameter("Enable Debug Logging", DefaultValue = false)]
+        public bool EnableDebugLogging { get; set; }
+
+        #endregion
+
+        #region Private State
+
+        private string _label;
+        private Bars _orbBars;
+        private Bars _entryBars;
+        private TimeFrame _orbTimeframe;
+        private TimeFrame _entryTimeframe;
+
+        private bool _orbCalculated;
+        private double _orbHigh;
+        private double _orbLow;
+        private double _orbRange;
+        private DateTime _lastOrbDate = DateTime.MinValue;
+
+        private bool _newYorkSessionActive;
+        private DateTime _sessionStartUtc;
+        private DateTime _sessionEndUtc;
+        private bool _sessionJustStarted;
+        private int _tradesToday;
+        private DateTime _lastTradeDate = DateTime.MinValue;
+
+        private readonly List<FVG> _fairValueGaps = new List<FVG>();
+        private readonly HashSet<string> _chartObjectIds = new HashSet<string>();
+        private static long _fvgCounter;
+
+        private double _maxDailyDrawdown;
+        private double _dailyPeakEquity;
+
+        private AverageTrueRange _atr;
+        private MovingAverage _emaFast;
+        private MovingAverage _emaSlow;
+        private string _currentMarketRegime = "NEUTRAL";
+        private int _currentDynamicEntryMethod = 2;
+
+        private bool _tradingHalted;
+
+        private TimeZoneInfo _easternTimeZone;
+
+        private struct FVG
+        {
+            public string Id;
+            public double Top;
+            public double Bottom;
+            public bool IsBullish;
+            public DateTime CreatedUtc;
+            public bool IsFilled;
+            public DateTime AnchorTime;
+        }
+
+        #endregion
+
+        #region Lifecycle
+
+        protected override void OnStart()
+        {
+            _label = $"ORBSMC_XAUUSD_{Server.TimeInUtc:yyyyMMdd_HHmmss}";
+            _orbTimeframe = ConvertStringToTimeFrame(OrbTimeframeString, TimeFrame.Hour);
+            _entryTimeframe = ConvertStringToTimeFrame(EntryTimeframeString, TimeFrame.Minute5);
+            _orbBars = MarketData.GetBars(_orbTimeframe, Symbol.Name);
+            _entryBars = MarketData.GetBars(_entryTimeframe, Symbol.Name);
+
+            _dailyPeakEquity = Account.Equity;
+            _maxDailyDrawdown = 0;
+            _tradingHalted = false;
+            _fairValueGaps.Clear();
+            _chartObjectIds.Clear();
+            _fvgCounter = 0;
+
+            _atr = Indicators.AverageTrueRange(AtrPeriod, MovingAverageType.Exponential);
+            _emaFast = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 9);
+            _emaSlow = Indicators.ExponentialMovingAverage(Bars.ClosePrices, 21);
+
+            _easternTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+
+            PrintBanner();
+
+            if (_orbBars == null || _entryBars == null)
+            {
+                PrintError("Failed to initialize bars for configured timeframes. Stopping bot.");
+                Stop();
+                return;
+            }
+
+            Positions.Opened += OnPositionOpened;
+            Positions.Closed += OnPositionClosed;
+            Positions.Modified += OnPositionModified;
+
+            var estNow = ConvertUtcToEastern(Server.TimeInUtc);
+            _newYorkSessionActive = IsNewYorkSessionActive(estNow);
+
+            if (_newYorkSessionActive && AutoCalculateORB)
+            {
+                CalculateORBLevels();
+                _sessionJustStarted = true;
+                _sessionStartUtc = Server.TimeInUtc;
+                AssessMarketConditions();
+            }
+
+            PrintInfo("Bot initialization complete");
+        }
+
+        protected override void OnStop()
+        {
+            Positions.Opened -= OnPositionOpened;
+            Positions.Closed -= OnPositionClosed;
+            Positions.Modified -= OnPositionModified;
+
+            CleanupChartObjects();
+            LogFinalPerformance();
+
+            PrintInfo("Bot stopped.");
+        }
+
+        #endregion
+
+        #region Core Event Handlers
+
+        protected override void OnBar()
+        {
+            try
+            {
+                var nowUtc = Server.TimeInUtc;
+                var estNow = ConvertUtcToEastern(nowUtc);
+
+                ResetDailyValues(nowUtc.Date);
+                UpdateDrawdownMonitoring();
+                AssessMarketConditions();
+
+                bool wasSessionActive = _newYorkSessionActive;
+                _newYorkSessionActive = IsNewYorkSessionActive(estNow);
+
+                if (!wasSessionActive && _newYorkSessionActive)
+                {
+                    PrintInfo("🟢 NEW YORK SESSION STARTED");
+                    _sessionJustStarted = true;
+                    _sessionStartUtc = nowUtc;
+                    _sessionEndUtc = GetSessionBoundaryUtc(estNow.Date, NewYorkEndHour);
+                    if (AutoCalculateORB)
+                        CalculateORBLevels();
+                    if (DrawOrbLevels)
+                        DrawSessionMarkers();
+                }
+
+                if (wasSessionActive && !_newYorkSessionActive)
+                {
+                    PrintInfo("🔴 NEW YORK SESSION ENDED");
+                    LogDailyPerformance();
+                }
+
+                if (EnableSMC && DetectFVG)
+                    DetectFairValueGaps();
+
+                if (_orbCalculated && _newYorkSessionActive && _tradesToday < MaxDailyTrades && !_tradingHalted)
+                    CheckForTradingOpportunities();
+
+                if (EnableTrailingStop || EnableBreakEven)
+                    UpdatePositionManagement();
+
+                _sessionJustStarted = false;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"OnBar exception: {ex.Message}");
+            }
+        }
+
+        protected override void OnTick()
+        {
+            try
+            {
+                if (_orbCalculated && _newYorkSessionActive && _tradesToday < MaxDailyTrades && !_tradingHalted)
+                    CheckForTradingOpportunities();
+
+                if (EnableSMC && DetectFVG)
+                    UpdateFvgFillStatus();
+
+                if (EnableTrailingStop || EnableBreakEven)
+                    UpdatePositionManagement();
+
+                UpdateDrawdownMonitoring();
+            }
+            catch (Exception ex)
+            {
+                PrintError($"OnTick exception: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Risk & Volume
+
+        private long CalculateVolumeInUnits()
+        {
+            try
+            {
+                double units;
+
+                if (!UseRiskManagement)
+                {
+                    units = Symbol.QuantityToVolumeInUnits(FixedVolumeLots);
+                    PrintInfo($"Fixed Volume Mode: {FixedVolumeLots} lots = {units:F0} units");
+                    return NormalizeVolumeUnits(units);
+                }
+
+                PrintInfo("=== RISK CALCULATION START ===");
+
+                double accountBalance = Account.Balance;
+                double riskAmount = accountBalance * (RiskPercentage / 100.0);
+
+                PrintInfo($"Account Balance: {accountBalance:F2} {Account.Currency}");
+                PrintInfo($"Risk Percentage: {RiskPercentage}%");
+                PrintInfo($"Risk Amount: {riskAmount:F2} {Account.Currency}");
+
+                double stopLossPips = CalculateStopLossPips();
+                if (stopLossPips <= 0)
+                {
+                    PrintError("Invalid stop loss calculation. Using fixed volume.");
+                    return NormalizeVolumeUnits(Symbol.QuantityToVolumeInUnits(FixedVolumeLots));
+                }
+
+                double pipValuePerLot = CalculatePipValuePerLot();
+                if (pipValuePerLot <= 0)
+                {
+                    PrintError("Invalid pip value calculation. Using fixed volume.");
+                    return NormalizeVolumeUnits(Symbol.QuantityToVolumeInUnits(FixedVolumeLots));
+                }
+
+                double calculatedLots = riskAmount / (stopLossPips * pipValuePerLot);
+                double maxAllowedLots = Symbol.Name.Contains("XAUUSD") ? 0.05 : 0.1;
+                double minAllowedLots = Symbol.QuantityToVolumeInUnits(0.01) >= Symbol.VolumeInUnitsMin
+                    ? 0.01
+                    : Symbol.VolumeInUnitsToQuantity(Symbol.VolumeInUnitsMin);
+
+                calculatedLots = Math.Max(minAllowedLots, Math.Min(calculatedLots, maxAllowedLots));
+
+                units = Symbol.QuantityToVolumeInUnits(calculatedLots);
+                var effectiveRisk = (stopLossPips * pipValuePerLot * calculatedLots);
+                var effectiveRiskPct = (effectiveRisk / accountBalance) * 100;
+
+                if (effectiveRiskPct > RiskPercentage + 0.05)
+                    PrintWarning($"Min lot forces risk {effectiveRiskPct:F3}% > target {RiskPercentage}%");
+
+                PrintInfo($"Final Lots: {calculatedLots:F4} ({units:F0} units)");
+                PrintInfo("=== RISK CALCULATION END ===");
+
+                return NormalizeVolumeUnits(units);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"CalculateVolumeInUnits exception: {ex.Message}");
+                var fallback = Symbol.QuantityToVolumeInUnits(0.01);
+                return NormalizeVolumeUnits(fallback);
+            }
+        }
+
+        private long NormalizeVolumeUnits(double unitsDouble)
+        {
+            try
+            {
+                long units = (long)Math.Round(unitsDouble);
+                long minVolume = (long)Symbol.VolumeInUnitsMin;
+                long maxVolume = (long)Symbol.VolumeInUnitsMax;
+                long volumeStep = (long)Symbol.VolumeInUnitsStep;
+
+                units = Math.Max(minVolume, Math.Min(units, maxVolume));
+
+                if (volumeStep > 0)
+                    units = (units / volumeStep) * volumeStep;
+
+                double normalized = Symbol.NormalizeVolumeInUnits(units, RoundingMode.ToNearest);
+                long finalUnits = (long)normalized;
+
+                if (finalUnits < minVolume)
+                    finalUnits = minVolume;
+                if (finalUnits > maxVolume)
+                    finalUnits = maxVolume;
+
+                double lots = Symbol.VolumeInUnitsToQuantity(finalUnits);
+                PrintInfo($"Volume normalized: {finalUnits} units = {lots:F4} lots");
+
+                return finalUnits;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Volume normalization error: {ex.Message}");
+                return (long)Symbol.VolumeInUnitsMin;
+            }
+        }
+
+        private double CalculatePipValuePerLot()
+        {
+            try
+            {
+                if (Symbol.Name.Contains("XAUUSD") || Symbol.Name.Contains("GOLD"))
+                {
+                    if (Symbol.PipValue > 0 && Symbol.PipValue < 10)
+                    {
+                        PrintInfo($"Using broker pip value: {Symbol.PipValue:F4}");
+                        return Symbol.PipValue;
+                    }
+
+                    const double standardGoldPipValue = 1.0;
+                    PrintInfo($"Using default Gold pip value: {standardGoldPipValue:F4}");
+                    return standardGoldPipValue;
+                }
+
+                return Symbol.PipValue > 0 ? Symbol.PipValue : 10.0;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Pip value calculation error: {ex.Message}");
+                return 1.0;
+            }
+        }
+
+        private double CalculateStopLossPips()
+        {
+            try
+            {
+                double sl;
+
+                if (UseAtrBasedTPSL)
+                {
+                    double atrValue = GetSafeAtrValue();
+                    double atrInPips = atrValue / Symbol.PipSize;
+                    sl = atrInPips * AtrMultiplierSL;
+                    sl = Math.Max(20.0, Math.Min(sl, 150.0));
+                    if (EnableDebugLogging)
+                        PrintInfo($"ATR-based SL: {atrInPips:F1} pips × {AtrMultiplierSL} = {sl:F1}");
+                }
+                else
+                {
+                    sl = FixedStopLossPips;
+                }
+
+                return sl;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"SL calculation error: {ex.Message}");
+                return FixedStopLossPips;
+            }
+        }
+
+        private double CalculateTakeProfitPips()
+        {
+            try
+            {
+                double slPips = CalculateStopLossPips();
+
+                if (slPips <= 0)
+                    return FixedTakeProfitPips;
+
+                if (UseAtrBasedTPSL)
+                {
+                    double tp = slPips * RiskRewardRatio;
+                    tp = Math.Max(30.0, Math.Min(tp, 300.0));
+                    if (EnableDebugLogging)
+                        PrintInfo($"ATR-based TP: SL={slPips:F1} × R/R={RiskRewardRatio} = {tp:F1}");
+                    return tp;
+                }
+
+                double tpFromRR = slPips * RiskRewardRatio;
+                return Math.Max(FixedTakeProfitPips, tpFromRR);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"TP calculation error: {ex.Message}");
+                return FixedTakeProfitPips;
+            }
+        }
+
+        private double GetSafeAtrValue()
+        {
+            try
+            {
+                if (_atr == null || _atr.Result == null || _atr.Result.Count == 0)
+                {
+                    PrintWarning("ATR indicator not ready - using fallback");
+                    return Symbol.PipSize * 30;
+                }
+
+                double atrValue = _atr.Result.LastValue;
+                if (double.IsNaN(atrValue) || atrValue <= 0)
+                {
+                    PrintWarning($"Invalid ATR value: {atrValue}");
+                    return Symbol.PipSize * 30;
+                }
+
+                double atrInPips = atrValue / Symbol.PipSize;
+                if (Symbol.Name.Contains("XAUUSD") && (atrInPips < 5 || atrInPips > 200))
+                {
+                    PrintWarning($"ATR out of range: {atrInPips:F1} pips");
+                    return Symbol.PipSize * 30;
+                }
+
+                return atrValue;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"ATR calculation error: {ex.Message}");
+                return Symbol.PipSize * 30;
+            }
+        }
+
+        private bool HasSufficientMargin(long volumeUnits)
+        {
+            try
+            {
+                double volumeLots = Symbol.VolumeInUnitsToQuantity(volumeUnits);
+                double estimatedMargin = double.NaN;
+
+                try
+                {
+                    estimatedMargin = Symbol.GetEstimatedMargin(TradeType.Buy, volumeLots);
+                }
+                catch
+                {
+                    estimatedMargin = volumeLots * (Symbol.Name.Contains("XAUUSD") ? 1500 : 1000);
+                }
+
+                double availableMargin = Account.FreeMargin;
+                double utilization = (estimatedMargin / availableMargin) * 100.0;
+
+                PrintInfo($"Margin Check: Required ~{estimatedMargin:F2}, Available {availableMargin:F2} ({utilization:F1}% used)");
+
+                if (estimatedMargin > availableMargin * 0.2)
+                {
+                    PrintWarning($"Trade would use {utilization:F1}% of margin - too high");
+                    return false;
+                }
+
+                if (estimatedMargin > availableMargin)
+                {
+                    PrintError("Insufficient margin");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Margin check error: {ex.Message}");
+                return false;
+            }
+        }
+
+        #endregion
+
+        #region Session / Time Helpers
+
+        private DateTime ConvertUtcToEastern(DateTime utc) =>
+            TimeZoneInfo.ConvertTimeFromUtc(utc, _easternTimeZone);
+
+        private DateTime GetSessionBoundaryUtc(DateTime estDate, double sessionHour)
+        {
+            var hour = (int)Math.Floor(sessionHour);
+            var minutes = (int)Math.Round((sessionHour - hour) * 60);
+            var local = new DateTime(estDate.Year, estDate.Month, estDate.Day, hour, minutes, 0, DateTimeKind.Unspecified);
+            return TimeZoneInfo.ConvertTimeToUtc(local, _easternTimeZone);
+        }
+
+        private bool IsNewYorkSessionActive(DateTime easternNow)
+        {
+            try
+            {
+                if (TradeOnlyWeekdays && (easternNow.DayOfWeek == DayOfWeek.Saturday || easternNow.DayOfWeek == DayOfWeek.Sunday))
+                    return false;
+
+                if (AvoidHighImpactNews && IsMarketHoliday(easternNow))
+                {
+                    PrintInfo("Market holiday detected - no trading");
+                    return false;
+                }
+
+                double currentHour = easternNow.Hour + (easternNow.Minute / 60.0);
+                return currentHour >= NewYorkStartHour && currentHour < NewYorkEndHour;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Session detection error: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool IsMarketHoliday(DateTime easternNow)
+        {
+            var year = easternNow.Year;
+            var holidays = new[]
+            {
+                nthWeekdayOfMonth(year, 1, DayOfWeek.Monday, 3), // MLK
+                nthWeekdayOfMonth(year, 2, DayOfWeek.Monday, 3), // Presidents
+                lastWeekdayOfMonth(year, 5, DayOfWeek.Monday),   // Memorial
+                new DateTime(year, 7, 4),                       // Independence
+                nthWeekdayOfMonth(year, 9, DayOfWeek.Monday, 1), // Labor
+                fourthThursdayOfNovember(year),                 // Thanksgiving
+                new DateTime(year, 12, 25),                     // Christmas
+                new DateTime(year, 1, 1)                        // New Year
+            };
+
+            return holidays.Any(h => h.Date == easternNow.Date);
+        }
+
+        private static DateTime nthWeekdayOfMonth(int year, int month, DayOfWeek day, int occurrence)
+        {
+            var first = new DateTime(year, month, 1);
+            int offset = ((int)day - (int)first.DayOfWeek + 7) % 7;
+            return first.AddDays(offset + (occurrence - 1) * 7);
+        }
+
+        private static DateTime lastWeekdayOfMonth(int year, int month, DayOfWeek day)
+        {
+            var dt = new DateTime(year, month, DateTime.DaysInMonth(year, month));
+            int offset = ((int)dt.DayOfWeek - (int)day + 7) % 7;
+            return dt.AddDays(-offset);
+        }
+
+        private static DateTime fourthThursdayOfNovember(int year) =>
+            nthWeekdayOfMonth(year, 11, DayOfWeek.Thursday, 4);
+
+        #endregion
+
+        #region ORB / FVG
+
+        private void CalculateORBLevels()
+        {
+            try
+            {
+                if (_orbBars == null || _orbBars.Count < 2)
+                {
+                    PrintError("Not enough orb bars to calculate ORB");
+                    _orbCalculated = false;
+                    return;
+                }
+
+                var estNow = ConvertUtcToEastern(Server.TimeInUtc);
+                var sessionStartUtc = GetSessionBoundaryUtc(estNow.Date, NewYorkStartHour);
+
+                int orbIndex = -1;
+                int maxCheck = Math.Min(OrbValidationPeriod, _orbBars.Count - 1);
+
+                for (int i = _orbBars.Count - 1; i >= _orbBars.Count - 1 - maxCheck && i > 0; i--)
+                {
+                    var openTime = _orbBars.OpenTimes[i];
+                    var prevOpen = _orbBars.OpenTimes[i - 1];
+                    if (openTime >= sessionStartUtc && prevOpen < sessionStartUtc)
+                    {
+                        orbIndex = i;
+                        break;
+                    }
+                }
+
+                if (orbIndex == -1)
+                {
+                    for (int i = 0; i < _orbBars.Count; i++)
+                    {
+                        if (_orbBars.OpenTimes[i].Date == Server.TimeInUtc.Date)
+                        {
+                            orbIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                if (orbIndex == -1)
+                {
+                    PrintError("ORB candle not found for today");
+                    _orbCalculated = false;
+                    return;
+                }
+
+                var high = _orbBars.HighPrices[orbIndex];
+                var low = _orbBars.LowPrices[orbIndex];
+
+                if (double.IsNaN(high) || double.IsNaN(low) || high <= low)
+                {
+                    PrintError("Invalid ORB levels detected");
+                    _orbCalculated = false;
+                    return;
+                }
+
+                _orbHigh = high;
+                _orbLow = low;
+                _orbRange = _orbHigh - _orbLow;
+                _orbCalculated = true;
+                _lastOrbDate = Server.TimeInUtc.Date;
+
+                PrintInfo($"ORB set -> High: {_orbHigh:F5}, Low: {_orbLow:F5}, Range: {_orbRange / Symbol.PipSize:F1} pips");
+
+                if (DrawOrbLevels)
+                    DrawORBLevels();
+            }
+            catch (Exception ex)
+            {
+                PrintError($"CalculateORBLevels exception: {ex.Message}");
+                _orbCalculated = false;
+            }
+        }
+
+        private void DetectFairValueGaps()
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 3)
+                    return;
+
+                CleanupOldFvgs();
+
+                int maxCheck = Math.Min(20, _entryBars.Count - 2);
+                for (int i = 2; i <= maxCheck; i++)
+                {
+                    int currentIndex = _entryBars.Count - i;
+                    int prevIndex = currentIndex - 1;
+                    if (currentIndex < 1 || prevIndex < 0)
+                        continue;
+
+                    double currentLow = _entryBars.LowPrices[currentIndex];
+                    double currentHigh = _entryBars.HighPrices[currentIndex];
+                    double prevLow = _entryBars.LowPrices[prevIndex];
+                    double prevHigh = _entryBars.HighPrices[prevIndex];
+                    DateTime anchorTime = _entryBars.OpenTimes[currentIndex];
+
+                    // Bullish gap: current low > prev high
+                    if (currentLow > prevHigh)
+                    {
+                        double fvgPips = (currentLow - prevHigh) / Symbol.PipSize;
+                        if (fvgPips >= FvgMinSizePips)
+                        {
+                            var fvg = new FVG
+                            {
+                                Id = $"FVG_BULL_{++_fvgCounter}",
+                                Top = currentLow,
+                                Bottom = prevHigh,
+                                IsBullish = true,
+                                CreatedUtc = Server.TimeInUtc,
+                                IsFilled = false,
+                                AnchorTime = anchorTime
+                            };
+
+                            if (!IsDuplicateFVG(fvg))
+                            {
+                                _fairValueGaps.Add(fvg);
+                                PrintInfo($"Detected Bullish FVG {fvg.Id} {fvg.Bottom:F5}-{fvg.Top:F5} ({fvgPips:F1} pips)");
+                                if (DrawFVGZones)
+                                    DrawFVGZone(fvg);
+                            }
+                        }
+                    }
+
+                    // Bearish gap: current high < prev low
+                    if (currentHigh < prevLow)
+                    {
+                        double fvgPips = (prevLow - currentHigh) / Symbol.PipSize;
+                        if (fvgPips >= FvgMinSizePips)
+                        {
+                            var fvg = new FVG
+                            {
+                                Id = $"FVG_BEAR_{++_fvgCounter}",
+                                Top = prevLow,
+                                Bottom = currentHigh,
+                                IsBullish = false,
+                                CreatedUtc = Server.TimeInUtc,
+                                IsFilled = false,
+                                AnchorTime = anchorTime
+                            };
+
+                            if (!IsDuplicateFVG(fvg))
+                            {
+                                _fairValueGaps.Add(fvg);
+                                PrintInfo($"Detected Bearish FVG {fvg.Id} {fvg.Bottom:F5}-{fvg.Top:F5} ({fvgPips:F1} pips)");
+                                if (DrawFVGZones)
+                                    DrawFVGZone(fvg);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"DetectFairValueGaps exception: {ex.Message}");
+            }
+        }
+
+        private void UpdateFvgFillStatus()
+        {
+            try
+            {
+                if (_fairValueGaps == null || !_fairValueGaps.Any())
+                    return;
+
+                double currentBid = Symbol.Bid;
+                double currentAsk = Symbol.Ask;
+
+                for (int i = 0; i < _fairValueGaps.Count; i++)
+                {
+                    var fvg = _fairValueGaps[i];
+                    if (fvg.IsFilled)
+                        continue;
+
+                    bool filled = false;
+                    if (fvg.IsBullish && currentBid <= fvg.Bottom)
+                        filled = true;
+                    if (!fvg.IsBullish && currentAsk >= fvg.Top)
+                        filled = true;
+
+                    if (filled)
+                    {
+                        fvg.IsFilled = true;
+                        _fairValueGaps[i] = fvg;
+                        PrintInfo($"FVG {fvg.Id} filled at Bid {currentBid:F5} / Ask {currentAsk:F5}");
+                        if (DrawFVGZones)
+                            UpdateFvgZoneAppearance(fvg);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"UpdateFvgFillStatus exception: {ex.Message}");
+            }
+        }
+
+        private void CleanupOldFvgs()
+        {
+            var cutoff = _fairValueGaps.Where(x => (Server.TimeInUtc - x.CreatedUtc).TotalHours > FvgMaxAgeHours).ToList();
+            foreach (var f in cutoff)
+            {
+                _fairValueGaps.Remove(f);
+                RemoveChartObject(f.Id);
+                RemoveChartObject(f.Id + "_Zone");
+                RemoveChartObject(f.Id + "_Text");
+                RemoveChartObject(f.Id + "_Filled");
+            }
+        }
+
+        private bool IsDuplicateFVG(FVG newFvg)
+        {
+            return _fairValueGaps.Any(f =>
+                Math.Abs(f.Top - newFvg.Top) < Symbol.PipSize * 2 &&
+                Math.Abs(f.Bottom - newFvg.Bottom) < Symbol.PipSize * 2);
+        }
+
+        #endregion
+
+        #region Market Conditions
+
+        private void AssessMarketConditions()
+        {
+            try
+            {
+                if (!EnableDynamicEntry)
+                {
+                    _currentDynamicEntryMethod = EntryMethod;
+                    return;
+                }
+
+                double volatility = GetCurrentVolatility();
+                double trendStrength = GetTrendStrength();
+                string trendDirection = GetTrendDirection();
+
+                string previousRegime = _currentMarketRegime;
+
+                if (volatility > HighVolatilityThreshold)
+                {
+                    _currentMarketRegime = trendStrength > StrongTrendThreshold ?
+                        "HIGH_VOL_TRENDING" : "HIGH_VOL_RANGING";
+                }
+                else if (volatility < LowVolatilityThreshold)
+                {
+                    _currentMarketRegime = trendStrength > StrongTrendThreshold ?
+                        "LOW_VOL_TRENDING" : "LOW_VOL_RANGING";
+                }
+                else
+                {
+                    _currentMarketRegime = trendStrength > StrongTrendThreshold ?
+                        "MED_VOL_TRENDING" : "MED_VOL_RANGING";
+                }
+
+                _currentDynamicEntryMethod = GetOptimalEntryMethod(_currentMarketRegime, trendDirection);
+
+                if (_currentMarketRegime != previousRegime && EnableDebugLogging)
+                {
+                    PrintInfo($"Market Regime Changed: {previousRegime} → {_currentMarketRegime}");
+                    PrintInfo($"Entry Method: {GetEntryMethodName(_currentDynamicEntryMethod)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Market condition assessment error: {ex.Message}");
+            }
+        }
+
+        private double GetCurrentVolatility()
+        {
+            try
+            {
+                double atrValue = GetSafeAtrValue();
+                double atrInPips = atrValue / Symbol.PipSize;
+                double typicalGoldAtr = 25.0;
+                return atrInPips / typicalGoldAtr;
+            }
+            catch
+            {
+                return 1.0;
+            }
+        }
+
+        private double GetTrendStrength()
+        {
+            try
+            {
+                if (_emaFast == null || _emaSlow == null)
+                    return 0.5;
+
+                int lookback = Math.Min(TrendStrengthPeriod, Bars.ClosePrices.Count - 1);
+                if (lookback <= 0)
+                    return 0.5;
+
+                int direction = 0;
+                int strength = 0;
+
+                for (int i = 1; i <= lookback; i++)
+                {
+                    double fastCurrent = _emaFast.Result.Last(i);
+                    double fastPrevious = _emaFast.Result.Last(i + 1);
+                    double slowCurrent = _emaSlow.Result.Last(i);
+                    double slowPrevious = _emaSlow.Result.Last(i + 1);
+
+                    if (fastCurrent > slowCurrent && fastPrevious > slowPrevious)
+                    {
+                        if (direction == 1 || direction == 0)
+                        {
+                            direction = 1;
+                            strength++;
+                        }
+                        else
+                        {
+                            strength--;
+                        }
+                    }
+                    else if (fastCurrent < slowCurrent && fastPrevious < slowPrevious)
+                    {
+                        if (direction == -1 || direction == 0)
+                        {
+                            direction = -1;
+                            strength++;
+                        }
+                        else
+                        {
+                            strength--;
+                        }
+                    }
+                    else
+                    {
+                        strength--;
+                    }
+                }
+
+                double normalizedStrength = (double)strength / lookback;
+                return Math.Max(0.0, Math.Min(1.0, normalizedStrength));
+            }
+            catch
+            {
+                return 0.5;
+            }
+        }
+
+        private string GetTrendDirection()
+        {
+            try
+            {
+                if (_emaFast == null || _emaSlow == null)
+                    return "NEUTRAL";
+
+                double fast = _emaFast.Result.LastValue;
+                double slow = _emaSlow.Result.LastValue;
+
+                if (fast > slow && _emaFast.Result.Last(1) > _emaSlow.Result.Last(1))
+                    return "BULLISH";
+                if (fast < slow && _emaFast.Result.Last(1) < _emaSlow.Result.Last(1))
+                    return "BEARISH";
+                return "NEUTRAL";
+            }
+            catch
+            {
+                return "NEUTRAL";
+            }
+        }
+
+        private int GetOptimalEntryMethod(string marketRegime, string trendDirection)
+        {
+            if (Symbol.Name.Contains("XAUUSD"))
+            {
+                switch (marketRegime)
+                {
+                    case "HIGH_VOL_TRENDING": return 2;
+                    case "HIGH_VOL_RANGING": return 3;
+                    case "LOW_VOL_TRENDING": return 1;
+                    case "LOW_VOL_RANGING": return 2;
+                    case "MED_VOL_TRENDING": return trendDirection == "NEUTRAL" ? 2 : 1;
+                    case "MED_VOL_RANGING": return 3;
+                    default: return 2;
+                }
+            }
+
+            switch (marketRegime)
+            {
+                case "HIGH_VOL_TRENDING": return 1;
+                case "HIGH_VOL_RANGING": return 2;
+                case "LOW_VOL_TRENDING": return 3;
+                case "LOW_VOL_RANGING": return 2;
+                case "MED_VOL_TRENDING": return trendDirection == "NEUTRAL" ? 2 : 1;
+                case "MED_VOL_RANGING": return 3;
+                default: return 2;
+            }
+        }
+
+        private string GetEntryMethodName(int method)
+        {
+            switch (method)
+            {
+                case 1: return "IMMEDIATE";
+                case 2: return "RETEST";
+                case 3: return "BREAK_PREVIOUS";
+                default: return "UNKNOWN";
+            }
+        }
+
+        #endregion
+
+        #region Trading Logic
+
+        private void CheckForTradingOpportunities()
+        {
+            try
+            {
+                if (!_orbCalculated)
+                    return;
+                if (HasOpenPosition())
+                    return;
+                if (!ValidateTradingConditions())
+                    return;
+
+                double currentAsk = Symbol.Ask;
+                double currentBid = Symbol.Bid;
+                double breakoutThreshold = MinBreakoutStrengthPips * Symbol.PipSize;
+
+                bool bullishBreakout = currentAsk > _orbHigh + breakoutThreshold;
+                bool bearishBreakout = currentBid < _orbLow - breakoutThreshold;
+
+                if (bullishBreakout)
+                    HandleBullishFlow();
+                else if (bearishBreakout)
+                    HandleBearishFlow();
+            }
+            catch (Exception ex)
+            {
+                PrintError($"CheckForTradingOpportunities exception: {ex.Message}");
+            }
+        }
+
+        private void HandleBullishFlow()
+        {
+            try
+            {
+                double currentBid = Symbol.Bid;
+                double tolerance = RetestTolerancePips * Symbol.PipSize;
+                bool retestingOrbHigh = Math.Abs(currentBid - _orbHigh) <= tolerance;
+                bool inBullFvg = IsPriceInBullishFVG(currentBid);
+
+                if (EnableSMC && RequireFVGConfirmation && !inBullFvg)
+                {
+                    Debug("Bull breakout: FVG confirmation required but not present");
+                    return;
+                }
+
+                if (RequireMomentumConfirmation && !HasBullishMomentum())
+                {
+                    Debug("Bull breakout lacks momentum confirmation");
+                    return;
+                }
+
+                int effectiveEntryMethod = EnableDynamicEntry ? _currentDynamicEntryMethod : EntryMethod;
+
+                switch (effectiveEntryMethod)
+                {
+                    case 1:
+                        if (IsBreakoutCandleClosed(true) && HasBreakoutMomentum(true))
+                            ExecuteTrade(TradeType.Buy, $"Immediate Breakout (Bull) - {_currentMarketRegime}");
+                        break;
+
+                    case 2:
+                        if ((retestingOrbHigh || inBullFvg) && IsRejectionCandle(true))
+                        {
+                            string reason = inBullFvg ? $"FVG Retest (Bull) - {_currentMarketRegime}" : $"ORB Retest (Bull) - {_currentMarketRegime}";
+                            ExecuteTrade(TradeType.Buy, reason);
+                        }
+                        break;
+
+                    case 3:
+                        if ((retestingOrbHigh || inBullFvg) && IsBreakOfPreviousHigh() && HasBullishMomentum())
+                            ExecuteTrade(TradeType.Buy, $"Break of Prev High (Bull) - {_currentMarketRegime}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"HandleBullishFlow exception: {ex.Message}");
+            }
+        }
+
+        private void HandleBearishFlow()
+        {
+            try
+            {
+                double currentAsk = Symbol.Ask;
+                double tolerance = RetestTolerancePips * Symbol.PipSize;
+                bool retestingOrbLow = Math.Abs(currentAsk - _orbLow) <= tolerance;
+                bool inBearFvg = IsPriceInBearishFVG(currentAsk);
+
+                if (EnableSMC && RequireFVGConfirmation && !inBearFvg)
+                {
+                    Debug("Bear breakout: FVG confirmation required but not present");
+                    return;
+                }
+
+                if (RequireMomentumConfirmation && !HasBearishMomentum())
+                {
+                    Debug("Bear breakout lacks momentum confirmation");
+                    return;
+                }
+
+                int effectiveEntryMethod = EnableDynamicEntry ? _currentDynamicEntryMethod : EntryMethod;
+
+                switch (effectiveEntryMethod)
+                {
+                    case 1:
+                        if (IsBreakoutCandleClosed(false) && HasBreakoutMomentum(false))
+                            ExecuteTrade(TradeType.Sell, $"Immediate Breakout (Bear) - {_currentMarketRegime}");
+                        break;
+
+                    case 2:
+                        if ((retestingOrbLow || inBearFvg) && IsRejectionCandle(false))
+                        {
+                            string reason = inBearFvg ? $"FVG Retest (Bear) - {_currentMarketRegime}" : $"ORB Retest (Bear) - {_currentMarketRegime}";
+                            ExecuteTrade(TradeType.Sell, reason);
+                        }
+                        break;
+
+                    case 3:
+                        if ((retestingOrbLow || inBearFvg) && IsBreakOfPreviousLow() && HasBearishMomentum())
+                            ExecuteTrade(TradeType.Sell, $"Break of Prev Low (Bear) - {_currentMarketRegime}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"HandleBearishFlow exception: {ex.Message}");
+            }
+        }
+
+        private bool HasBullishMomentum()
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 2)
+                    return true;
+                return _entryBars.ClosePrices.Last(0) > _entryBars.ClosePrices.Last(1);
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private bool HasBearishMomentum()
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 2)
+                    return true;
+                return _entryBars.ClosePrices.Last(0) < _entryBars.ClosePrices.Last(1);
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private bool HasBreakoutMomentum(bool isBullish)
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 2)
+                    return true;
+                var open = _entryBars.OpenPrices.Last(0);
+                var close = _entryBars.ClosePrices.Last(0);
+                return isBullish ? close > open : close < open;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        private bool IsBreakoutCandleClosed(bool isBullish)
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 2)
+                    return false;
+                var lastClosedClose = _entryBars.ClosePrices.Last(1);
+                return isBullish ? lastClosedClose > _orbHigh : lastClosedClose < _orbLow;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsRejectionCandle(bool isBullish)
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 2)
+                    return false;
+                var high = _entryBars.HighPrices.Last(1);
+                var low = _entryBars.LowPrices.Last(1);
+                var close = _entryBars.ClosePrices.Last(1);
+                double range = high - low;
+                if (range <= 0)
+                    return false;
+                double closePos = (close - low) / range;
+                return isBullish ? closePos > 0.6 : closePos < 0.4;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsBreakOfPreviousHigh()
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 3)
+                    return false;
+                return _entryBars.HighPrices.Last(1) > _entryBars.HighPrices.Last(2);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsBreakOfPreviousLow()
+        {
+            try
+            {
+                if (_entryBars == null || _entryBars.Count < 3)
+                    return false;
+                return _entryBars.LowPrices.Last(1) < _entryBars.LowPrices.Last(2);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsPriceInBullishFVG(double price)
+        {
+            try
+            {
+                return _fairValueGaps.Any(f => f.IsBullish && !f.IsFilled && price >= f.Bottom && price <= f.Top);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool IsPriceInBearishFVG(double price)
+        {
+            try
+            {
+                return _fairValueGaps.Any(f => !f.IsBullish && !f.IsFilled && price >= f.Bottom && price <= f.Top);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        #endregion
+
+        #region Trade Execution
+
+        private void ExecuteTrade(TradeType tradeType, string reason)
+        {
+            try
+            {
+                if (_tradingHalted)
+                {
+                    PrintWarning("Trading is halted due to drawdown limit");
+                    return;
+                }
+
+                if (!ValidateTradingConditions())
+                {
+                    Debug("Trading conditions not met");
+                    return;
+                }
+
+                long volumeUnits = CalculateVolumeInUnits();
+
+                if (!HasSufficientMargin(volumeUnits))
+                {
+                    PrintError("Insufficient margin - skipping trade");
+                    return;
+                }
+
+                double slPips = CalculateStopLossPips();
+                double tpPips = CalculateTakeProfitPips();
+
+                if (slPips <= 0 || tpPips <= 0)
+                {
+                    PrintError("Invalid SL/TP configuration");
+                    return;
+                }
+
+                PrintInfo("========================================");
+                PrintInfo($"OPENING {tradeType} POSITION");
+                PrintInfo($"Reason: {reason}");
+                PrintInfo($"Volume: {volumeUnits} units ({Symbol.VolumeInUnitsToQuantity(volumeUnits):F4} lots)");
+                PrintInfo($"Stop Loss: {slPips:F1} pips");
+                PrintInfo($"Take Profit: {tpPips:F1} pips");
+                PrintInfo($"Risk/Reward: 1:{(tpPips / slPips):F2}");
+                PrintInfo("========================================");
+
+                var result = ExecuteMarketOrder(tradeType, Symbol.Name, volumeUnits, _label, slPips, tpPips);
+
+                if (result.IsSuccessful)
+                {
+                    _tradesToday++;
+                    var pos = result.Position;
+                    PrintInfo($"✅ SUCCESS: {tradeType} @ {pos.EntryPrice:F5}");
+                    PrintInfo($"Position Details: SL={pos.StopLoss:F5}, TP={pos.TakeProfit:F5}");
+                    PrintInfo($"Daily Trades: {_tradesToday}/{MaxDailyTrades}");
+                }
+                else
+                {
+                    PrintError($"❌ FAILED: {result.Error}");
+                    LogTradeError(result.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"ExecuteTrade exception: {ex.Message}");
+                PrintError($"Stack: {ex.StackTrace}");
+            }
+        }
+
+        private void LogTradeError(ErrorCode? error)
+        {
+            if (!error.HasValue)
+                return;
+
+            switch (error.Value)
+            {
+                case ErrorCode.BadVolume:
+                    PrintError("BAD VOLUME ERROR");
+                    PrintError($"Min: {Symbol.VolumeInUnitsMin}, Max: {Symbol.VolumeInUnitsMax}, Step: {Symbol.VolumeInUnitsStep}");
+                    PrintError("Try reducing Fixed Volume or Risk Percentage");
+                    break;
+                case ErrorCode.NoMoney:
+                    PrintError("INSUFFICIENT FUNDS - Deposit more funds or reduce position size");
+                    break;
+                case ErrorCode.Disconnected:
+                    PrintError("CONNECTION LOST - Check internet connection");
+                    break;
+                case ErrorCode.MarketClosed:
+                    PrintError("MARKET CLOSED - Check trading hours");
+                    break;
+                case ErrorCode.TechnicalError:
+                    PrintError("TECHNICAL ERROR - Try again in a moment");
+                    break;
+                default:
+                    PrintError($"UNKNOWN ERROR: {error.Value}");
+                    break;
+            }
+        }
+
+        #endregion
+
+        #region Position Management
+
+        private void UpdatePositionManagement()
+        {
+            try
+            {
+                var positions = Positions.FindAll(_label, Symbol.Name);
+                if (positions == null || positions.Length == 0)
+                    return;
+
+                foreach (var pos in positions)
+                {
+                    if (EnableTrailingStop)
+                        UpdateTrailingStop(pos);
+                    if (EnableBreakEven)
+                        UpdateBreakEven(pos);
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"UpdatePositionManagement exception: {ex.Message}");
+            }
+        }
+
+        private void UpdateTrailingStop(Position pos)
+        {
+            try
+            {
+                double currentPrice = pos.TradeType == TradeType.Buy ? Symbol.Bid : Symbol.Ask;
+                double trigger = TrailingStopTriggerPips * Symbol.PipSize;
+                double dist = TrailingStopDistancePips * Symbol.PipSize;
+
+                if (pos.TradeType == TradeType.Buy)
+                {
+                    double profit = currentPrice - pos.EntryPrice;
+                    if (profit >= trigger)
+                    {
+                        double newStop = currentPrice - dist;
+                        if (!pos.StopLoss.HasValue || newStop > pos.StopLoss.Value)
+                        {
+                            ModifyPosition(pos, newStop, pos.TakeProfit);
+                            Debug($"Trailing stop moved for Buy to {newStop:F5}");
+                        }
+                    }
+                }
+                else
+                {
+                    double profit = pos.EntryPrice - currentPrice;
+                    if (profit >= trigger)
+                    {
+                        double newStop = currentPrice + dist;
+                        if (!pos.StopLoss.HasValue || newStop < pos.StopLoss.Value)
+                        {
+                            ModifyPosition(pos, newStop, pos.TakeProfit);
+                            Debug($"Trailing stop moved for Sell to {newStop:F5}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug($"UpdateTrailingStop exception: {ex.Message}");
+            }
+        }
+
+        private void UpdateBreakEven(Position pos)
+        {
+            try
+            {
+                double currentPrice = pos.TradeType == TradeType.Buy ? Symbol.Bid : Symbol.Ask;
+                double trigger = BreakEvenTriggerPips * Symbol.PipSize;
+
+                double profit = pos.TradeType == TradeType.Buy ? currentPrice - pos.EntryPrice : pos.EntryPrice - currentPrice;
+                if (profit >= trigger)
+                {
+                    ModifyPosition(pos, pos.EntryPrice, pos.TakeProfit);
+                    PrintInfo($"Break-even set for {pos.TradeType} at {pos.EntryPrice:F5}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug($"UpdateBreakEven exception: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Risk / Drawdown Monitoring
+
+        private void UpdateDrawdownMonitoring()
+        {
+            try
+            {
+                double currentEquity = Account.Equity;
+
+                if (currentEquity > _dailyPeakEquity)
+                    _dailyPeakEquity = currentEquity;
+
+                double currentDrawdown = _dailyPeakEquity - currentEquity;
+                double drawdownPercentage = _dailyPeakEquity == 0 ? 0 : (currentDrawdown / _dailyPeakEquity) * 100.0;
+
+                if (currentDrawdown > _maxDailyDrawdown)
+                    _maxDailyDrawdown = currentDrawdown;
+
+                if (drawdownPercentage > MaxDrawdownPercentage && !_tradingHalted)
+                {
+                    _tradingHalted = true;
+                    PrintWarning($"🚨 TRADING HALTED: Max drawdown exceeded ({drawdownPercentage:F1}% > {MaxDrawdownPercentage}%)");
+                }
+
+                if (EnableDebugLogging && DateTime.UtcNow.Minute % 30 == 0)
+                {
+                    PrintInfo($"Drawdown Monitor: Current {drawdownPercentage:F1}%, Max {(_maxDailyDrawdown / _dailyPeakEquity * 100):F1}%");
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Drawdown monitoring error: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Validation & Daily Management
+
+        private bool ValidateTradingConditions()
+        {
+            try
+            {
+                if (_tradingHalted)
+                    return false;
+
+                if (_tradesToday >= MaxDailyTrades)
+                {
+                    Debug("Daily trade limit reached");
+                    return false;
+                }
+
+                if (HasOpenPosition())
+                {
+                    Debug("Position already open");
+                    return false;
+                }
+
+                double spreadPips = (Symbol.Ask - Symbol.Bid) / Symbol.PipSize;
+                if (spreadPips > MaxSpreadPips)
+                {
+                    Debug($"Spread too high: {spreadPips:F1} > {MaxSpreadPips} pips");
+                    return false;
+                }
+
+                if (!_orbCalculated)
+                {
+                    Debug("ORB not calculated");
+                    return false;
+                }
+
+                if (_sessionJustStarted && (Server.TimeInUtc - _sessionStartUtc).TotalMinutes < 5)
+                {
+                    Debug("Waiting for session to stabilize");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Trading condition validation error: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool HasOpenPosition()
+        {
+            return Positions.Find(_label, Symbol.Name) != null;
+        }
+
+        private void ResetDailyValues(DateTime todayUtc)
+        {
+            try
+            {
+                if (_lastTradeDate.Date != todayUtc.Date)
+                {
+                    _tradesToday = 0;
+                    _lastTradeDate = todayUtc.Date;
+                    _orbCalculated = false;
+                    _fairValueGaps.Clear();
+                    _dailyPeakEquity = Account.Equity;
+                    _maxDailyDrawdown = 0;
+                    _tradingHalted = false;
+
+                    PrintInfo($"🔄 NEW TRADING DAY: {todayUtc:yyyy-MM-dd} - Counters reset");
+                    PrintInfo($"Starting Equity: {Account.Equity:F2} {Account.Currency}");
+                }
+            }
+            catch (Exception ex)
+            {
+                PrintError($"ResetDailyValues exception: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Performance Logging
+
+        private void LogDailyPerformance()
+        {
+            try
+            {
+                var today = Server.TimeInUtc.Date;
+                var tradesToday = History.Where(t =>
+                    t.EntryTime.Date == today &&
+                    t.Label == _label &&
+                    t.SymbolName == Symbol.Name);
+
+                if (!tradesToday.Any())
+                    return;
+
+                double todayProfit = tradesToday.Sum(t => t.NetProfit);
+                int wins = tradesToday.Count(t => t.NetProfit >= 0);
+                int losses = tradesToday.Count(t => t.NetProfit < 0);
+                double winRate = (wins + losses) > 0 ? (double)wins / (wins + losses) * 100.0 : 0;
+
+                PrintInfo("========================================");
+                PrintInfo($"📊 DAILY PERFORMANCE SUMMARY");
+                PrintInfo($"Trades: {wins}W / {losses}L (Win Rate: {winRate:F1}%)");
+                PrintInfo($"P&L: {todayProfit:F2} {Account.Currency}");
+                if (_dailyPeakEquity > 0)
+                {
+                    PrintInfo($"Max Drawdown: {_maxDailyDrawdown:F2} ({(_maxDailyDrawdown / _dailyPeakEquity * 100):F1}%)");
+                }
+                PrintInfo("========================================");
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Performance logging error: {ex.Message}");
+            }
+        }
+
+        private void LogFinalPerformance()
+        {
+            try
+            {
+                var allTrades = History.Where(t => t.Label == _label && t.SymbolName == Symbol.Name);
+                if (!allTrades.Any())
+                    return;
+
+                double totalProfit = allTrades.Sum(t => t.NetProfit);
+                int totalWins = allTrades.Count(t => t.NetProfit >= 0);
+                int totalLosses = allTrades.Count(t => t.NetProfit < 0);
+                double overallWinRate = (double)totalWins / (totalWins + totalLosses) * 100.0;
+
+                PrintInfo("========================================");
+                PrintInfo($"🎯 FINAL PERFORMANCE SUMMARY");
+                PrintInfo($"Total Trades: {totalWins + totalLosses}");
+                PrintInfo($"Wins: {totalWins}, Losses: {totalLosses}");
+                PrintInfo($"Win Rate: {overallWinRate:F1}%");
+                PrintInfo($"Total P&L: {totalProfit:F2} {Account.Currency}");
+                PrintInfo($"Max Daily Drawdown: {_maxDailyDrawdown:F2}");
+                PrintInfo("========================================");
+            }
+            catch (Exception ex)
+            {
+                PrintError($"Final performance logging error: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Chart Drawing
+
+        private void DrawORBLevels()
+        {
+            try
+            {
+                RemoveChartObject("ORB_High");
+                RemoveChartObject("ORB_Low");
+                RemoveChartObject("ORB_High_Label");
+                RemoveChartObject("ORB_Low_Label");
+                RemoveChartObject("ORB_Range_Label");
+
+                AddChartObject(Chart.DrawHorizontalLine("ORB_High", _orbHigh, Color.LimeGreen, 2, LineStyle.Solid));
+                AddChartObject(Chart.DrawText("ORB_High_Label", $"ORB High {_orbHigh:F5}", Server.TimeInUtc.AddMinutes(1), _orbHigh, Color.LimeGreen));
+
+                AddChartObject(Chart.DrawHorizontalLine("ORB_Low", _orbLow, Color.Red, 2, LineStyle.Solid));
+                AddChartObject(Chart.DrawText("ORB_Low_Label", $"ORB Low {_orbLow:F5}", Server.TimeInUtc.AddMinutes(1), _orbLow, Color.Red));
+
+                double rangePips = _orbRange / Symbol.PipSize;
+                AddChartObject(Chart.DrawText("ORB_Range_Label", $"ORB Range: {rangePips:F1} pips", Server.TimeInUtc.AddMinutes(10), (_orbHigh + _orbLow) / 2, Color.Gold));
+            }
+            catch (Exception ex)
+            {
+                PrintError($"DrawORBLevels exception: {ex.Message}");
+            }
+        }
+
+        private void DrawSessionMarkers()
+        {
+            try
+            {
+                RemoveChartObject("Session_Start");
+                RemoveChartObject("Session_End");
+                RemoveChartObject("Session_Start_Label");
+                RemoveChartObject("Session_End_Label");
+
+                DateTime estNow = ConvertUtcToEastern(Server.TimeInUtc);
+                var sessionLocalStart = new DateTime(estNow.Year, estNow.Month, estNow.Day,
+                                                     (int)NewYorkStartHour, (int)((NewYorkStartHour % 1) * 60), 0);
+
+                var sessionLocalEnd = new DateTime(estNow.Year, estNow.Month, estNow.Day,
+                                                   (int)NewYorkEndHour, (int)((NewYorkEndHour % 1) * 60), 0);
+
+                DateTime sessionStartUtc = TimeZoneInfo.ConvertTimeToUtc(sessionLocalStart, _easternTimeZone);
+                DateTime sessionEndUtc = TimeZoneInfo.ConvertTimeToUtc(sessionLocalEnd, _easternTimeZone);
+
+                AddChartObject(Chart.DrawVerticalLine("Session_Start", sessionStartUtc, Color.Cyan, 2, LineStyle.Dots));
+                AddChartObject(Chart.DrawText("Session_Start_Label", "NY Session Start", sessionStartUtc, Bars.HighPrices.LastValue + 3 * Symbol.PipSize, Color.Cyan));
+
+                AddChartObject(Chart.DrawVerticalLine("Session_End", sessionEndUtc, Color.Orange, 2, LineStyle.Dots));
+                AddChartObject(Chart.DrawText("Session_End_Label", "NY Session End", sessionEndUtc, Bars.HighPrices.LastValue + 3 * Symbol.PipSize, Color.Orange));
+
+                _sessionStartUtc = sessionStartUtc;
+                _sessionEndUtc = sessionEndUtc;
+            }
+            catch (Exception ex)
+            {
+                PrintError($"DrawSessionMarkers exception: {ex.Message}");
+            }
+        }
+
+        private void DrawFVGZone(FVG fvg)
+        {
+            try
+            {
+                string zoneId = fvg.Id + "_Zone";
+                string textId = fvg.Id + "_Text";
+
+                RemoveChartObject(zoneId);
+                RemoveChartObject(textId);
+
+                DateTime start = fvg.AnchorTime;
+                DateTime end = start.AddHours(6);
+
+                var rect = Chart.DrawRectangle(zoneId,
+                    start, fvg.Top,
+                    end, fvg.Bottom,
+                    fvg.IsBullish ? Color.FromArgb(40, 50, 205, 50) : Color.FromArgb(40, 205, 50, 50),
+                    1, LineStyle.Solid);
+                AddChartObject(rect);
+
+                var text = Chart.DrawText(textId, fvg.IsBullish ? $"BULL FVG {fvg.Id}" : $"BEAR FVG {fvg.Id}",
+                    start.AddMinutes(5), (fvg.Top + fvg.Bottom) / 2,
+                    fvg.IsBullish ? Color.LimeGreen : Color.Red);
+                AddChartObject(text);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"DrawFVGZone exception: {ex.Message}");
+            }
+        }
+
+        private void UpdateFvgZoneAppearance(FVG fvg)
+        {
+            try
+            {
+                string filledId = fvg.Id + "_Filled";
+                RemoveChartObject(filledId);
+
+                DateTime start = fvg.AnchorTime;
+                DateTime end = start.AddHours(6);
+
+                var rect = Chart.DrawRectangle(filledId,
+                    start, fvg.Top,
+                    end, fvg.Bottom,
+                    Color.FromArgb(20, Color.Gray.R, Color.Gray.G, Color.Gray.B),
+                    1, LineStyle.Dots);
+                AddChartObject(rect);
+            }
+            catch (Exception ex)
+            {
+                PrintError($"UpdateFvgZoneAppearance exception: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Event Handlers
+
+        private void OnPositionOpened(PositionOpenedEventArgs args)
+        {
+            try
+            {
+                var p = args.Position;
+                string sl = p.StopLoss.HasValue ? p.StopLoss.Value.ToString("F5") : "None";
+                string tp = p.TakeProfit.HasValue ? p.TakeProfit.Value.ToString("F5") : "None";
+                PrintInfo($"POSITION OPENED: {p.TradeType} @ {p.EntryPrice:F5} | SL: {sl} | TP: {tp} | Units: {p.VolumeInUnits}");
+            }
+            catch (Exception ex)
+            {
+                Debug($"OnPositionOpened exception: {ex.Message}");
+            }
+        }
+
+        private void OnPositionClosed(PositionClosedEventArgs args)
+        {
+            try
+            {
+                var p = args.Position;
+                PrintInfo($"POSITION CLOSED: {p.TradeType} | P&L: {args.Position.NetProfit:F2} {Account.Currency} | Reason: {args.Reason}");
+            }
+            catch (Exception ex)
+            {
+                Debug($"OnPositionClosed exception: {ex.Message}");
+            }
+        }
+
+        private void OnPositionModified(PositionModifiedEventArgs args)
+        {
+            try
+            {
+                var p = args.Position;
+                Debug($"Position modified: {p.TradeType} Entry:{p.EntryPrice:F5} SL:{(p.StopLoss.HasValue ? p.StopLoss.Value.ToString("F5") : "None")}");
+            }
+            catch (Exception ex)
+            {
+                Debug($"OnPositionModified exception: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Cleanup / Utilities
+
+        private void CleanupChartObjects()
+        {
+            try
+            {
+                foreach (var id in _chartObjectIds.ToList())
+                {
+                    Chart.RemoveObject(id);
+                    _chartObjectIds.Remove(id);
+                }
+
+                foreach (var f in _fairValueGaps)
+                {
+                    RemoveChartObject(f.Id);
+                    RemoveChartObject(f.Id + "_Zone");
+                    RemoveChartObject(f.Id + "_Text");
+                    RemoveChartObject(f.Id + "_Filled");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug($"CleanupChartObjects exception: {ex.Message}");
+            }
+        }
+
+        private void AddChartObject(ChartObject obj)
+        {
+            if (obj == null)
+                return;
+            _chartObjectIds.Add(obj.Name);
+        }
+
+        private void RemoveChartObject(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return;
+            Chart.RemoveObject(id);
+            _chartObjectIds.Remove(id);
+        }
+
+        private TimeFrame ConvertStringToTimeFrame(string tf, TimeFrame defaultTf)
+        {
+            if (string.IsNullOrEmpty(tf))
+                return defaultTf;
+
+            switch (tf.ToLowerInvariant())
+            {
+                case "minute1": return TimeFrame.Minute;
+                case "minute5": return TimeFrame.Minute5;
+                case "minute15": return TimeFrame.Minute15;
+                case "minute30": return TimeFrame.Minute30;
+                case "hour": return TimeFrame.Hour;
+                case "hour4": return TimeFrame.Hour4;
+                case "daily": return TimeFrame.Daily;
+                case "week": return TimeFrame.Weekly;
+                default: return defaultTf;
+            }
+        }
+
+        private void PrintBanner()
+        {
+            PrintInfo("========================================");
+            PrintInfo($"Starting FIXED ORB SMC Bot on {Symbol.Name}");
+            PrintInfo($"ORB TF: {_orbTimeframe}, Entry TF: {_entryTimeframe}");
+            PrintInfo("========================================");
+            PrintInfo($"Risk Management: {(UseRiskManagement ? "ENABLED" : "DISABLED")}");
+
+            if (UseRiskManagement)
+            {
+                PrintInfo($"Risk Per Trade: {RiskPercentage}%");
+                PrintInfo($"ATR-based SL/TP: {(UseAtrBasedTPSL ? "YES" : "NO")}");
+            }
+            else
+            {
+                PrintInfo($"Fixed Volume: {FixedVolumeLots} lots");
+                PrintInfo($"Fixed SL: {FixedStopLossPips} pips, TP: {FixedTakeProfitPips} pips");
+            }
+
+            PrintInfo($"Symbol Details:");
+            PrintInfo($"  Pip Size: {Symbol.PipSize}");
+            PrintInfo($"  Pip Value: {Symbol.PipValue}");
+            PrintInfo($"  Min Volume: {Symbol.VolumeInUnitsMin} units");
+            PrintInfo($"  Max Volume: {Symbol.VolumeInUnitsMax} units");
+            PrintInfo($"  Volume Step: {Symbol.VolumeInUnitsStep} units");
+            PrintInfo($"  Tick Size: {Symbol.TickSize}");
+            PrintInfo("========================================");
+        }
+
+        private void PrintInfo(string msg)
+        {
+            Print($"[INFO] {Server.TimeInUtc:yyyy-MM-dd HH:mm:ss} - {msg}");
+        }
+
+        private void PrintError(string msg)
+        {
+            Print($"[ERROR] {Server.TimeInUtc:yyyy-MM-dd HH:mm:ss} - {msg}");
+        }
+
+        private void PrintWarning(string msg)
+        {
+            Print($"[WARNING] {Server.TimeInUtc:yyyy-MM-dd HH:mm:ss} - {msg}");
+        }
+
+        private void Debug(string msg)
+        {
+            if (EnableDebugLogging)
+                Print($"[DEBUG] {Server.TimeInUtc:yyyy-MM-dd HH:mm:ss} - {msg}");
+        }
+
+        #endregion
+    }
+}
